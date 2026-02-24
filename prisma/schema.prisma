@@ -1,0 +1,145 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum OrderStatus {
+  Pending
+  Paid
+  Shipped
+  Delivered
+  Cancelled
+}
+
+enum DesignStatus {
+  Pending
+  Reviewed
+  InProduction
+  Completed
+  Rejected
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(USER)
+  createdAt DateTime @default(now())
+
+  orders        Orders[]
+  cart          Cart?
+  designUploads DesignUpload[]
+}
+
+model Product {
+  id            Int      @id @default(autoincrement())
+  name          String
+  brand         String   @default("PULSEPR")
+  description   String?
+  price         Float
+  discountPrice Float?
+  category      String
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  images     ProductImages[]
+  sizes      Sizes[]
+  orderItems OrderItems[]
+  cartItems  CartItem[]
+}
+
+model ProductImages {
+  id        Int    @id @default(autoincrement())
+  productId Int
+  imageUrl  String
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model Sizes {
+  id            Int    @id @default(autoincrement())
+  productId     Int
+  size          String
+  stockQuantity Int    @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model Offers {
+  id                 Int      @id @default(autoincrement())
+  title              String
+  discountPercentage Float
+  startDate          DateTime
+  endDate            DateTime
+  isActive           Boolean  @default(true)
+}
+
+model Orders {
+  id          Int         @id @default(autoincrement())
+  userId      Int
+  totalAmount Float
+  paymentId   String?
+  orderStatus OrderStatus @default(Pending)
+  address     String
+  createdAt   DateTime    @default(now())
+
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderItems OrderItems[]
+}
+
+model OrderItems {
+  id        Int    @id @default(autoincrement())
+  orderId   Int
+  productId Int
+  size      String
+  quantity  Int
+  price     Float
+
+  order   Orders  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model Cart {
+  id     Int  @id @default(autoincrement())
+  userId Int  @unique
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  items CartItem[]
+}
+
+model CartItem {
+  id        Int    @id @default(autoincrement())
+  cartId    Int
+  productId Int
+  size      String
+  quantity  Int    @default(1)
+
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model DesignUpload {
+  id          Int          @id @default(autoincrement())
+  userId      Int
+  imageUrl    String
+  publicId    String       // Cloudinary public_id for deletion
+  note        String?
+  printSize   String?
+  quantity    Int          @default(1)
+  status      DesignStatus @default(Pending)
+  adminNote   String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
