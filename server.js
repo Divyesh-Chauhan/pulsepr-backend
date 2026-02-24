@@ -12,19 +12,8 @@ import designRoutes from './routes/designRoutes.js';
 const app = express();
 
 // ─── CORS ────────────────────────────────────────────────────────────────────
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-    : ['http://localhost:5173', 'http://localhost:3000'];
-
 app.use(cors({
-    origin: (origin, callback) => {
-        // Allow requests with no origin (e.g., mobile apps, Postman, curl)
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            callback(new Error(`CORS policy: Origin "${origin}" not allowed`));
-        }
-    },
+    origin: true, // Allow all origins
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
@@ -72,10 +61,6 @@ app.use((err, req, res, next) => {
     if (err.code === 'LIMIT_UNEXPECTED_FILE') {
         return res.status(400).json({ message: 'Unexpected file field.' });
     }
-    // CORS error
-    if (err.message && err.message.startsWith('CORS policy')) {
-        return res.status(403).json({ message: err.message });
-    }
 
     res.status(err.status || 500).json({ message: err.message || 'Internal Server Error' });
 });
@@ -84,6 +69,5 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n✅ PULSEPR Backend running on port ${PORT}`);
-    console.log(`   Environment : ${process.env.NODE_ENV || 'development'}`);
-    console.log(`   Allowed origins: ${allowedOrigins.join(', ')}\n`);
+    console.log(`   Environment : ${process.env.NODE_ENV || 'development'}\n`);
 });
