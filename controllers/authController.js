@@ -95,6 +95,13 @@ export const getProfile = async (req, res) => {
 // GET /api/auth/orders — Get current user's order history
 export const getMyOrders = async (req, res) => {
     try {
+        const activeOffers = await prisma.offers.findMany({ where: { isActive: true } });
+        let customDesignPrice = 799;
+        if (activeOffers.length > 0) {
+            const bestOffer = activeOffers.reduce((p, c) => p.discountPercentage > c.discountPercentage ? p : c);
+            customDesignPrice = Math.round(customDesignPrice * ((100 - bestOffer.discountPercentage) / 100));
+        }
+
         const orders = await prisma.orders.findMany({
             where: { userId: req.user.id },
             include: {
@@ -106,7 +113,37 @@ export const getMyOrders = async (req, res) => {
             },
             orderBy: { createdAt: 'desc' }
         });
-        return res.status(200).json({ orders });
+
+        const designs = await prisma.designUpload.findMany({
+            where: { userId: req.user.id, note: { contains: 'PaymentID:' } },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        const designOrders = designs.map(d => ({
+            id: `CD-${d.id}`,
+            userId: d.userId,
+            totalAmount: customDesignPrice * d.quantity,
+            paymentId: d.note ? d.note.split('PaymentID: ')[1] : 'N/A',
+            orderStatus: d.status === 'Pending' ? 'Paid' : d.status,
+            address: 'Custom Design Address',
+            createdAt: d.createdAt,
+            orderItems: [{
+                id: `CDI-${d.id}`,
+                orderId: `CD-${d.id}`,
+                productId: 'custom',
+                size: d.printSize || 'Default',
+                quantity: d.quantity,
+                price: customDesignPrice,
+                product: {
+                    name: 'Custom Design',
+                    images: [{ imageUrl: d.imageUrl }]
+                }
+            }]
+        }));
+
+        const allOrders = [...orders, ...designOrders].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        return res.status(200).json({ orders: allOrders });
     } catch (error) {
         console.error('Get My Orders Error:', error);
         return res.status(500).json({ message: 'Internal Server Error' });

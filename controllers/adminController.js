@@ -171,6 +171,13 @@ export const getProducts = async (req, res) => {
 // GET /api/admin/orders
 export const getOrders = async (req, res) => {
     try {
+        const activeOffers = await prisma.offers.findMany({ where: { isActive: true } });
+        let customDesignPrice = 799;
+        if (activeOffers.length > 0) {
+            const bestOffer = activeOffers.reduce((p, c) => p.discountPercentage > c.discountPercentage ? p : c);
+            customDesignPrice = Math.round(customDesignPrice * ((100 - bestOffer.discountPercentage) / 100));
+        }
+
         const orders = await prisma.orders.findMany({
             include: {
                 user: { select: { id: true, name: true, email: true } },
@@ -178,7 +185,39 @@ export const getOrders = async (req, res) => {
             },
             orderBy: { createdAt: 'desc' }
         });
-        return res.status(200).json({ orders });
+
+        const designs = await prisma.designUpload.findMany({
+            where: { note: { contains: 'PaymentID:' } },
+            include: { user: { select: { id: true, name: true, email: true } } },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        const designOrders = designs.map(d => ({
+            id: `CD-${d.id}`,
+            userId: d.userId,
+            totalAmount: customDesignPrice * d.quantity,
+            paymentId: d.note ? d.note.split('PaymentID: ')[1] : 'N/A',
+            orderStatus: d.status === 'Pending' ? 'Paid' : d.status,
+            address: 'Custom Design Address',
+            createdAt: d.createdAt,
+            user: d.user,
+            orderItems: [{
+                id: `CDI-${d.id}`,
+                orderId: `CD-${d.id}`,
+                productId: 'custom',
+                size: d.printSize || 'Default',
+                quantity: d.quantity,
+                price: customDesignPrice,
+                product: {
+                    name: 'Custom Design',
+                    images: [{ imageUrl: d.imageUrl }]
+                }
+            }]
+        }));
+
+        const allOrders = [...orders, ...designOrders].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        return res.status(200).json({ orders: allOrders });
     } catch (error) {
         console.error('Get Orders Error:', error);
         return res.status(500).json({ message: 'Internal Server Error' });
@@ -194,8 +233,24 @@ export const updateOrderStatus = async (req, res) => {
             return res.status(400).json({ message: 'Invalid order status' });
         }
 
+        const idParam = req.params.id;
+
+        if (idParam.startsWith('CD-')) {
+            const designId = parseInt(idParam.replace('CD-', ''));
+            let designStatus = 'Pending';
+            if (orderStatus === 'Shipped' || orderStatus === 'Delivered') designStatus = 'Completed';
+            else if (orderStatus === 'Paid') designStatus = 'InProduction';
+            else if (orderStatus === 'Cancelled') designStatus = 'Rejected';
+
+            const updatedDesign = await prisma.designUpload.update({
+                where: { id: designId },
+                data: { status: designStatus }
+            });
+            return res.status(200).json({ message: 'Order status updated successfully (Custom Design)', order: updatedDesign });
+        }
+
         const updatedOrder = await prisma.orders.update({
-            where: { id: parseInt(req.params.id) },
+            where: { id: parseInt(idParam) },
             data: { orderStatus }
         });
         return res.status(200).json({ message: 'Order status updated successfully', order: updatedOrder });
@@ -229,12 +284,25 @@ export const getUsers = async (req, res) => {
 // GET /api/admin/stats
 export const getStats = async (req, res) => {
     try {
+        const activeOffers = await prisma.offers.findMany({ where: { isActive: true } });
+        let customDesignPrice = 799;
+        if (activeOffers.length > 0) {
+            const bestOffer = activeOffers.reduce((p, c) => p.discountPercentage > c.discountPercentage ? p : c);
+            customDesignPrice = Math.round(customDesignPrice * ((100 - bestOffer.discountPercentage) / 100));
+        }
+
         const totalUsers = await prisma.user.count({ where: { role: 'USER' } });
         const orders = await prisma.orders.findMany({
             where: { orderStatus: { in: ['Paid', 'Shipped', 'Delivered'] } }
         });
-        const totalOrders = orders.length;
-        const totalRevenue = orders.reduce((sum, order) => sum + order.totalAmount, 0);
+
+        const paidDesigns = await prisma.designUpload.findMany({
+            where: { note: { contains: 'PaymentID:' } }
+        });
+
+        const totalOrders = orders.length + paidDesigns.length;
+        const totalRevenue = orders.reduce((sum, order) => sum + order.totalAmount, 0) + (paidDesigns.length * customDesignPrice);
+
         const pendingDesigns = await prisma.designUpload.count({ where: { status: 'Pending' } });
 
         const orderItems = await prisma.orderItems.groupBy({
@@ -312,7 +380,9 @@ export const applyOffer = async (req, res) => {
 
         for (const prod of productsToUpdate) {
             const discountMultiplier = (100 - offer.discountPercentage) / 100;
-            const newDiscountPrice = parseFloat((prod.price * discountMultiplier).toFixed(2));
+            const basePrice = prod.discountPrice || prod.price;
+            const rawDiscountPrice = basePrice * discountMultiplier;
+            const newDiscountPrice = Math.round(rawDiscountPrice);
             await prisma.product.update({ where: { id: prod.id }, data: { discountPrice: newDiscountPrice } });
         }
         return res.status(200).json({ message: 'Offer successfully applied to products' });
